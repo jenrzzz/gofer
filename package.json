@@ -1,0 +1,16 @@
+{
+  "name": "gofer",
+  "version": "0.1.0",
+  "description": "An HTTP API over a real Chrome on this Mac, so agents can browse as the household",
+  "type": "module",
+  "private": true,
+  "bin": { "gofer": "bin/gofer" },
+  "scripts": {
+    "test": "node --test test/",
+    "live": "GOFER_LIVE=1 node --test test/live.test.js"
+  },
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "playwright": "^1.63.0"
+  }
+}

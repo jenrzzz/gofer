@@ -1,0 +1,238 @@
+#!/usr/bin/env node
+// gofer serve                        run the server (GOFER_BIND, GOFER_PORT)
+// gofer key add NAME [options]       make or rotate a key; the token prints once
+//   --domains LIST                     comma list the key may browse (default: anywhere)
+//   --block LIST                       comma list of URL path prefixes it may never reach, e.g. /checkout,/buy
+// gofer key list | revoke NAME
+// gofer check                        is the server up, and what Chrome is it driving?
+// gofer open URL                     open a session in the window, to log into a site by hand
+// gofer sessions                     what is open right now
+// gofer install [--dry-run]          the launchd agent that keeps the server running
+// gofer uninstall
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
+import { Keys, KeyError } from "../lib/keys.js";
+import { serve, settings } from "../lib/gofer.js";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const LABEL = "place.amber.gofer";
+const PLIST = join(homedir(), "Library/LaunchAgents", `${LABEL}.plist`);
+const config = settings();
+const keys = new Keys(config.keysPath);
+
+function usage() {
+  const lines = readFileSync(fileURLToPath(import.meta.url), "utf8").split("\n").slice(1);
+  for (const line of lines) {
+    if (!line.startsWith("//")) break;
+    console.log(line.replace(/^\/\/ ?/, ""));
+  }
+  process.exit(1);
+}
+
+function keyAdd(argv) {
+  let parsed;
+  try {
+    parsed = parseArgs({ args: argv, options: { domains: { type: "string" }, block: { type: "string" } }, allowPositionals: true });
+  } catch (error) {
+    abort(error.message);
+  }
+  const name = parsed.positionals[0];
+  if (!name) abort("gofer key add needs a name");
+  const list = (value) => (value ? value.split(",").map((item) => item.trim()).filter(Boolean) : []);
+  try {
+    const token = keys.add(name, { domains: list(parsed.values.domains), blocked_paths: list(parsed.values.block) });
+    const domains = parsed.values.domains ? `domains ${list(parsed.values.domains).join(", ")}` : "any domain";
+    const blocked = parsed.values.block ? `; never ${list(parsed.values.block).join(", ")}` : "";
+    console.log(`key ${name}: ${domains}${blocked}`);
+    console.log(`  ${token}`);
+    console.log(`shown once; gofer keeps only a digest (${keys.path})`);
+  } catch (error) {
+    if (error instanceof KeyError) abort(error.message);
+    throw error;
+  }
+}
+
+function keyList() {
+  const all = keys.all();
+  if (all.length === 0) console.log("no keys yet: bin/gofer key add NAME --domains amazon.com --block /checkout");
+  for (const key of all) {
+    const domains = key.domains.length ? key.domains.join(",") : "any domain";
+    const blocked = key.blocked_paths.length ? `  never ${key.blocked_paths.join(",")}` : "";
+    console.log(`${key.name.padEnd(24)} ${domains}${blocked}`);
+  }
+}
+
+// The CLI's own key, for `check`, `open` and `sessions` against the running
+// server. Made on first use, kept raw next to the digests, mode 600.
+function localToken() {
+  const path = join(config.home, "local.key");
+  if (existsSync(path)) {
+    const token = readFileSync(path, "utf8").trim();
+    if (keys.authenticate(token)) return token;
+  }
+  const token = keys.add("local");
+  mkdirSync(config.home, { recursive: true, mode: 0o700 });
+  writeFileSync(path, `${token}\n`, { mode: 0o600 });
+  return token;
+}
+
+async function call(method, path, body = null) {
+  const url = `http://${config.bind.split(",")[0]}:${config.port}${path}`;
+  let response;
+  try {
+    response = await fetch(url, {
+      method,
+      headers: { authorization: `Bearer ${localToken()}`, "content-type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined
+    });
+  } catch {
+    abort(`no gofer server at ${url} (bin/gofer serve, or bin/gofer install)`);
+  }
+  const json = await response.json();
+  if (!response.ok) abort(json.error ?? `${response.status}`);
+  return json;
+}
+
+async function check() {
+  const chrome = config.executable ?? "Playwright's Chromium (no Google Chrome found; GOFER_CHROME=/path/to/Google Chrome)";
+  const status = await call("GET", "/v1/status");
+  const browser = status.browser;
+  console.log(`gofer ${status.gofer}: ${browser.running ? `Chrome ${browser.version} running` : "browser not launched yet"}, ${status.sessions} session(s) open`);
+  console.log(`  executable: ${browser.executable === "playwright chromium" ? chrome : browser.executable}`);
+  console.log(`  profile:    ${browser.profile}`);
+}
+
+async function open(url) {
+  if (!url) abort("gofer open needs a URL");
+  if (!/^https?:\/\//.test(url)) url = `https://${url}`;
+  const state = await call("POST", "/v1/sessions", { url, ttl: 3600 });
+  console.log(`session ${state.id} at ${state.url}: "${state.title}"`);
+  console.log("Log in, do what needs doing in the window; the session closes itself after an hour of quiet,");
+  console.log(`or now: curl -X DELETE -H "Authorization: Bearer $(cat ${join(config.home, "local.key")})" http://${config.bind.split(",")[0]}:${config.port}/v1/sessions/${state.id}`);
+}
+
+async function sessions() {
+  const { sessions } = await call("GET", "/v1/sessions");
+  if (sessions.length === 0) console.log("no sessions open for the local key");
+  for (const session of sessions) console.log(`${session.id}  ${session.steps} steps  until ${session.expires_at}  ${session.url}`);
+}
+
+// A LaunchAgent, in the login session, so the Chrome window is a real one
+// on this Mac's screen: a person can log in there, or solve a captcha.
+function install(argv) {
+  const node = process.execPath;
+  const logs = join(homedir(), "Library/Logs/gofer");
+  const environment = {
+    GOFER_BIND: config.bind,
+    GOFER_PORT: String(config.port),
+    GOFER_HOME: config.home,
+    LANG: "en_US.UTF-8",
+    PATH: "/usr/bin:/bin:/usr/sbin:/sbin"
+  };
+  if (process.env.GOFER_CHROME) environment.GOFER_CHROME = process.env.GOFER_CHROME;
+  if (process.env.GOFER_HEADLESS) environment.GOFER_HEADLESS = process.env.GOFER_HEADLESS;
+  const program = [node, join(ROOT, "bin/gofer"), "serve"];
+  const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${LABEL}</string>
+  <key>WorkingDirectory</key><string>${ROOT}</string>
+  <key>ProgramArguments</key>
+  <array>
+${program.map((argument) => `    <string>${argument}</string>`).join("\n")}
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+${Object.entries(environment).map(([name, value]) => `    <key>${name}</key><string>${value}</string>`).join("\n")}
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>StandardOutPath</key><string>${logs}/server.log</string>
+  <key>StandardErrorPath</key><string>${logs}/server.log</string>
+</dict>
+</plist>
+`;
+  if (argv.includes("--dry-run")) return console.log(plist);
+
+  mkdirSync(logs, { recursive: true });
+  mkdirSync(dirname(PLIST), { recursive: true });
+  writeFileSync(PLIST, plist);
+  const domain = `gui/${process.getuid()}`;
+  spawnSync("launchctl", ["bootout", `${domain}/${LABEL}`], { stdio: "ignore" });
+  // bootout answers before launchd has let go of the label; try a few times.
+  let loaded = false;
+  for (let attempt = 0; attempt < 10 && !loaded; attempt++) {
+    if (attempt) execFileSync("sleep", [String(0.5 * attempt)]);
+    loaded = spawnSync("launchctl", ["bootstrap", domain, PLIST], { stdio: "ignore" }).status === 0;
+  }
+  if (!loaded) abort(`launchctl could not load ${PLIST}; gofer is NOT running (launchctl bootstrap ${domain} ${PLIST})`);
+  console.log(`gofer is running on ${config.bind} port ${config.port} and will start at login.`);
+  console.log(`logs: ${logs}/server.log · what was done: ${config.auditPath}`);
+  console.log(`Chrome: ${config.executable ?? "Playwright's Chromium"}; profile: ${config.profile}`);
+  console.log("bin/gofer open amazon.com opens a tab in the window so you can log in.");
+}
+
+function uninstall() {
+  spawnSync("launchctl", ["bootout", `gui/${process.getuid()}/${LABEL}`], { stdio: "ignore" });
+  if (existsSync(PLIST)) unlinkSync(PLIST);
+  console.log("gofer's launchd agent is gone; keys, the profile and logs are untouched.");
+}
+
+function abort(message) {
+  console.error(`gofer: ${message}`);
+  process.exit(1);
+}
+
+const [command, ...rest] = process.argv.slice(2);
+switch (command) {
+  case "serve":
+    await serve(config);
+    break;
+  case "key":
+    switch (rest.shift()) {
+      case "add":
+        keyAdd(rest);
+        break;
+      case "list":
+        keyList();
+        break;
+      case "revoke": {
+        const name = rest.shift();
+        if (!name) abort("gofer key revoke needs a name");
+        try {
+          keys.revoke(name);
+          console.log(`revoked ${name}`);
+        } catch (error) {
+          if (error instanceof KeyError) abort(error.message);
+          throw error;
+        }
+        break;
+      }
+      default:
+        usage();
+    }
+    break;
+  case "check":
+    await check();
+    break;
+  case "open":
+    await open(rest[0]);
+    break;
+  case "sessions":
+    await sessions();
+    break;
+  case "install":
+    install(rest);
+    break;
+  case "uninstall":
+    uninstall();
+    break;
+  default:
+    usage();
+}
