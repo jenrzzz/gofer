@@ -89,6 +89,42 @@ a link in a new tab has that tab folded back into the session: the session's
 tab goes where the new one was going, if it was allowed to. There is no
 action that opens a second tab, uploads a file, or runs script.
 
+## Key management (admin)
+
+```
+PATCH /v1/keys/:name
+{ "domains": ["amazon.com", "ynab.com"] }   replaces the key's domains; [] means unrestricted
+→ 200 { "name": "hob", "domains": ["amazon.com", "ynab.com"] }
+```
+
+Widens or narrows a key's domain allowlist without rotating its token or
+touching `blocked_paths`. This is a household-admin operation, not a
+browsing one: it needs `Authorization: Bearer <GOFER_ADMIN_TOKEN>`, a
+credential set in the server's environment, separate from any browsing
+key and never stored in `keys.json`. An optional `X-Admin-Actor: <name>`
+header is recorded in the audit log alongside the change; without it the
+log says `"admin"`.
+
+Domain entries are trimmed and lowercased; a non-array `domains`, a
+non-string entry, or an empty-string entry is rejected whole (no partial
+update). Every call, accepted or rejected, is appended to the audit log
+(`GOFER_AUDIT_LOG`) with the key name, the admin actor, and the domains
+before and after.
+
+```sh
+curl -X PATCH -H "Authorization: Bearer $GOFER_ADMIN_TOKEN" \
+     -H "content-type: application/json" \
+     -d '{"domains":["amazon.com","ynab.com"]}' \
+     http://127.0.0.1:8378/v1/keys/hob
+```
+
+| status | means |
+|---|---|
+| `200 { name, domains }` | updated |
+| `400 { error }` | `domains` was missing, not an array, held a non-string, or held an empty string |
+| `401 { error: "unauthorized" }` | no `GOFER_ADMIN_TOKEN` configured, or the bearer token didn't match it (a browsing key does not work here) |
+| `404 { error }` | no key by that name |
+
 ## Errors
 
 | status | means |
