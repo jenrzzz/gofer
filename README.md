@@ -56,7 +56,8 @@ tailnet is the transport security, and the keys are the authorization.
 | `GOFER_PROFILE` | `$GOFER_HOME/profile` | Chrome's user data directory: the cookies, the logins |
 | `GOFER_CHROME` | `~/Applications` or `/Applications` Google Chrome | the browser to drive; unset and absent, Playwright's Chromium |
 | `GOFER_HEADLESS` | unset | `1` to run without a window (tests; not for Amazon) |
-| `GOFER_AUDIT_LOG` | `~/Library/Logs/gofer/audit.jsonl` | one line per session opened, step taken, navigation refused, session closed |
+| `GOFER_AUDIT_LOG` | `~/Library/Logs/gofer/audit.jsonl` | one line per session opened, step taken, navigation refused, session closed, key updated |
+| `GOFER_ADMIN_TOKEN` | unset | bearer token for `PATCH /v1/keys/:name` (below); unset means that endpoint always answers `401` |
 | `GOFER_TTL` | `900` | seconds a session lives without a call |
 | `GOFER_MAX_LIFE` | `3600` | seconds a session lives at most |
 | `GOFER_SESSIONS` | `4` | sessions open at once |
@@ -89,6 +90,19 @@ The profile is the blast radius. gofer cannot tell "Place your order"
 from any other button; what it can do is keep a key off the pages where
 that button lives. Log the profile into an account whose worst case you
 can live with, turn 1-Click off, and block the buying paths.
+
+To change a key's domains without rotating its token — widening or
+narrowing what it may browse while any session already using it keeps
+working — use `PATCH /v1/keys/:name` instead of the CLI (which always
+rotates). It takes `GOFER_ADMIN_TOKEN`, not a browsing key; see
+[API.md](API.md#key-management-admin).
+
+```sh
+export GOFER_ADMIN_TOKEN=$(openssl rand -base64 24)   # set this in the server's environment
+curl -X PATCH -H "Authorization: Bearer $GOFER_ADMIN_TOKEN" \
+     -d '{"domains":["amazon.com","ynab.com"]}' \
+     http://127.0.0.1:8378/v1/keys/hob
+```
 
 ## How it works
 

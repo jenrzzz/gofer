@@ -60,3 +60,15 @@ test("a key with no domains browses anywhere", () => {
   const key = keys.authenticate(keys.add("local"));
   assert.equal(key.refusal("https://example.org/"), null);
 });
+
+test("setDomains replaces the list in place, leaving the token valid", () => {
+  const keys = fresh();
+  const token = keys.add("hob", { domains: ["amazon.com"], blocked_paths: ["/checkout"] });
+  const before = keys.setDomains("hob", ["ynab.com", "chase.com"]);
+  assert.deepEqual(before, ["amazon.com"]);
+  const key = keys.authenticate(token);
+  assert.equal(key.name, "hob");
+  assert.deepEqual(key.domains, ["ynab.com", "chase.com"]);
+  assert.deepEqual(key.blocked_paths, ["/checkout"]);
+  assert.throws(() => keys.setDomains("nope", []), KeyError);
+});
