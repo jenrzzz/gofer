@@ -57,7 +57,7 @@ tailnet is the transport security, and the keys are the authorization.
 | `GOFER_CHROME` | `~/Applications` or `/Applications` Google Chrome | the browser to drive; unset and absent, Playwright's Chromium |
 | `GOFER_HEADLESS` | unset | `1` to run without a window (tests; not for Amazon) |
 | `GOFER_AUDIT_LOG` | `~/Library/Logs/gofer/audit.jsonl` | one line per session opened, step taken, navigation refused, session closed, key updated |
-| `GOFER_ADMIN_TOKEN` | unset | bearer token for `PATCH /v1/keys/:name` (below); unset means that endpoint always answers `401` |
+| `GOFER_ADMIN_TOKEN` | unset | bearer token for `PATCH /v1/keys/:name` (below); unset means that endpoint always answers `401`. `gofer install` takes it from the environment, or from `$GOFER_HOME/admin.token` |
 | `GOFER_TTL` | `900` | seconds a session lives without a call |
 | `GOFER_MAX_LIFE` | `3600` | seconds a session lives at most |
 | `GOFER_SESSIONS` | `4` | sessions open at once |
@@ -98,8 +98,9 @@ rotates). It takes `GOFER_ADMIN_TOKEN`, not a browsing key; see
 [API.md](API.md#key-management-admin).
 
 ```sh
-export GOFER_ADMIN_TOKEN=$(openssl rand -base64 24)   # set this in the server's environment
-curl -X PATCH -H "Authorization: Bearer $GOFER_ADMIN_TOKEN" \
+(umask 077; openssl rand -base64 24 > ~/.config/gofer/admin.token)
+GOFER_BIND=127.0.0.1,100.90.105.100 bin/gofer install   # puts it in the launchd agent's environment
+curl -X PATCH -H "Authorization: Bearer $(cat ~/.config/gofer/admin.token)" \
      -d '{"domains":["amazon.com","ynab.com"]}' \
      http://127.0.0.1:8378/v1/keys/hob
 ```

@@ -9,7 +9,7 @@
 // gofer sessions                     what is open right now
 // gofer install [--dry-run]          the launchd agent that keeps the server running
 // gofer uninstall
-import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -135,7 +135,13 @@ function install(argv) {
   };
   if (process.env.GOFER_CHROME) environment.GOFER_CHROME = process.env.GOFER_CHROME;
   if (process.env.GOFER_HEADLESS) environment.GOFER_HEADLESS = process.env.GOFER_HEADLESS;
+  // The admin token from the environment, or else the one kept beside the
+  // keys; without it PATCH /v1/keys answers 401 to everyone.
+  const adminTokenPath = join(config.home, "admin.token");
+  const adminToken = process.env.GOFER_ADMIN_TOKEN ?? (existsSync(adminTokenPath) ? readFileSync(adminTokenPath, "utf8").trim() : "");
+  if (adminToken) environment.GOFER_ADMIN_TOKEN = adminToken;
   const program = [node, join(ROOT, "bin/gofer"), "serve"];
+  const dryRun = argv.includes("--dry-run");
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -148,7 +154,7 @@ ${program.map((argument) => `    <string>${argument}</string>`).join("\n")}
   </array>
   <key>EnvironmentVariables</key>
   <dict>
-${Object.entries(environment).map(([name, value]) => `    <key>${name}</key><string>${value}</string>`).join("\n")}
+${Object.entries(environment).map(([name, value]) => `    <key>${name}</key><string>${name === "GOFER_ADMIN_TOKEN" && dryRun ? "(redacted)" : value}</string>`).join("\n")}
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -158,11 +164,13 @@ ${Object.entries(environment).map(([name, value]) => `    <key>${name}</key><str
 </dict>
 </plist>
 `;
-  if (argv.includes("--dry-run")) return console.log(plist);
+  if (dryRun) return console.log(plist);
 
   mkdirSync(logs, { recursive: true });
   mkdirSync(dirname(PLIST), { recursive: true });
-  writeFileSync(PLIST, plist);
+  // Mode 600: the plist can hold the admin token.
+  writeFileSync(PLIST, plist, { mode: 0o600 });
+  chmodSync(PLIST, 0o600);
   const domain = `gui/${process.getuid()}`;
   spawnSync("launchctl", ["bootout", `${domain}/${LABEL}`], { stdio: "ignore" });
   // bootout answers before launchd has let go of the label; try a few times.
@@ -175,6 +183,7 @@ ${Object.entries(environment).map(([name, value]) => `    <key>${name}</key><str
   console.log(`gofer is running on ${config.bind} port ${config.port} and will start at login.`);
   console.log(`logs: ${logs}/server.log · what was done: ${config.auditPath}`);
   console.log(`Chrome: ${config.executable ?? "Playwright's Chromium"}; profile: ${config.profile}`);
+  console.log(adminToken ? "PATCH /v1/keys: on (GOFER_ADMIN_TOKEN)" : `PATCH /v1/keys: off (no GOFER_ADMIN_TOKEN, no ${adminTokenPath})`);
   console.log("bin/gofer open amazon.com opens a tab in the window so you can log in.");
 }
 
