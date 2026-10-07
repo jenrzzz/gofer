@@ -109,6 +109,10 @@ test("a session opens with a ref snapshot, acts by ref, and closes", async () =>
   const read = await call("POST", `/v1/sessions/${session.id}/actions`, { action: "read" });
   assert.match(read.body.text, /Order 333-444 · \$56.78 · Gadget/);
 
+  const html = await call("POST", `/v1/sessions/${session.id}/actions`, { action: "html" });
+  assert.match(html.body.text, /^<html><head><title>Orders<\/title>/);
+  assert.match(html.body.text, /<li>Order 111-222 · \$12.34 · Widget<\/li>/);
+
   const back = await call("POST", `/v1/sessions/${session.id}/actions`, { action: "back" });
   assert.equal(back.body.title, "Shop");
 
@@ -124,10 +128,10 @@ test("a session opens with a ref snapshot, acts by ref, and closes", async () =>
 
   const listed = await call("GET", "/v1/sessions");
   assert.equal(listed.body.sessions.length, 1);
-  assert.equal(listed.body.sessions[0].steps, 6);
+  assert.equal(listed.body.sessions[0].steps, 7);
 
   const closed = await call("DELETE", `/v1/sessions/${session.id}`);
-  assert.deepEqual(closed.body, { id: session.id, closed: true, steps: 6 });
+  assert.deepEqual(closed.body, { id: session.id, closed: true, steps: 7 });
   assert.equal((await call("GET", `/v1/sessions/${session.id}`)).status, 410);
 });
 

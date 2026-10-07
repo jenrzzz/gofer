@@ -49,7 +49,7 @@ GET    /v1/status                            the server, the browser, and your k
   "snapshot": "- main [ref=e10]:\n  - heading \"Sign in or create account\" [level=1] [ref=e18]\n ...",
   "truncated": false,
   "blocked": null,                 or { url, reason } when the last step tried to leave the allowed ground
-  "text": "...",                   after a read
+  "text": "...",                   after a read or html
   "screenshot": "<base64 png>" }   when asked
 ```
 
@@ -83,6 +83,7 @@ POST /v1/sessions/:id/actions
 | `back`, `forward`, `reload` | | the browser buttons |
 | `wait` | `seconds` (up to 30), or `text` to wait for | let the page catch up |
 | `read` | optional `ref`, `max_chars` | the visible text of an element (or the page) as `text`, for when structure is in the way of the words |
+| `html` | optional `ref` | the markup of an element (or the whole document, as rendered now) as `text`, up to 5,000,000 characters, for a caller that extracts the article itself |
 
 Each step waits for the page to settle before answering. A page that opens
 a link in a new tab has that tab folded back into the session: the session's
