@@ -36,7 +36,7 @@ curl -H "Authorization: Bearer gfr_..." -d '{"url":"https://www.amazon.com/"}' l
 To keep it running across logins, and reachable from the tailnet:
 
 ```sh
-GOFER_BIND=127.0.0.1,100.90.105.100 bin/gofer install   # a launchd agent
+GOFER_BIND=127.0.0.1,100.x.y.z bin/gofer install   # a launchd agent
 bin/gofer open amazon.com                               # a tab in the window: go log in
 bin/gofer check                                         # up? which Chrome? which profile?
 bin/gofer sessions
@@ -99,7 +99,7 @@ rotates). It takes `GOFER_ADMIN_TOKEN`, not a browsing key; see
 
 ```sh
 (umask 077; openssl rand -base64 24 > ~/.config/gofer/admin.token)
-GOFER_BIND=127.0.0.1,100.90.105.100 bin/gofer install   # puts it in the launchd agent's environment
+GOFER_BIND=127.0.0.1,100.x.y.z bin/gofer install   # puts it in the launchd agent's environment
 curl -X PATCH -H "Authorization: Bearer $(cat ~/.config/gofer/admin.token)" \
      -d '{"domains":["amazon.com","ynab.com"]}' \
      http://127.0.0.1:8378/v1/keys/hob

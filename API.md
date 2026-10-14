@@ -145,7 +145,7 @@ POST /v1/sessions { "url": "https://www.amazon.com/your-orders/orders" }
 → { "id": "S", "title": "Your Orders", "snapshot": "... link \"View order details\" [ref=e88] ..." }
 
 POST /v1/sessions/S/actions { "action": "read" }
-→ { "text": "Order placed September 12, 2026 · Total $43.18 · Ship to Jenner · Order # 113-... " }
+→ { "text": "Order placed March 3, 2026 · Total $19.99 · Ship to Alex · Order # 111-... " }
 
 POST /v1/sessions/S/actions { "action": "click", "ref": "e88" }
 → { "title": "Order Details", "snapshot": "..." }
